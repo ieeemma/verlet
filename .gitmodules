@@ -1,0 +1,9 @@
+[submodule "deps/zgl"]
+	path = deps/zgl
+	url = https://github.com/ziglibs/zgl
+[submodule "deps/mach-glfw"]
+	path = deps/mach-glfw
+	url = https://github.com/hexops/mach-glfw
+[submodule "deps/nanovg-zig"]
+	path = deps/nanovg-zig
+	url = https://github.com/silversquirl/nanovg-zig
