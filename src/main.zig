@@ -5,60 +5,29 @@ const nvg = @import("nanovg");
 
 const physics = @import("physics.zig");
 const Vec2 = physics.Vec2;
+const Transform = @import("Transform.zig");
 
-const Transform = struct {
-    translate: Vec2 = Vec2{ 0.0, 0.0 },
-    scale: f32 = 1.0,
+const tick = std.time.ns_per_s / 60;
 
-    fn compose(a: Transform, b: Transform) Transform {
-        return .{
-            .translate = a.translate * Vec2{ b.scale, b.scale } + b.translate,
-            .scale = a.scale * b.scale,
-        };
-    }
-
-    fn modify(a: *Transform, b: Transform) void {
-        a.* = a.compose(b);
-    }
-
-    fn invert(self: Transform) Transform {
-        return .{
-            .translate = -self.translate / @splat(2, self.scale),
-            .scale = 1.0 / self.scale,
-        };
-    }
-
-    fn apply(self: Transform, vec: Vec2) Vec2 {
-        return vec * Vec2{ self.scale, self.scale } + self.translate;
-    }
-};
-
-const Scene = struct {
-    transform: Transform,
-    solver: physics.Solver,
-};
-
-var scene: Scene = undefined;
+var transform: Transform = .{};
 
 fn scrollCallback(win: glfw.Window, scroll_x: f64, scroll_y: f64) void {
     if (win.getKey(.left_control) == .press) {
         const cursor = win.getCursorPos() catch return;
         const pos = Vec2{ @floatCast(f32, cursor.xpos), @floatCast(f32, cursor.ypos) };
 
-        const t = scene.transform;
+        const t = transform;
         const mouse_world = t.invert().apply(pos);
         const to_origin = t.invert().compose(.{ .translate = -mouse_world });
         const from_origin = to_origin.invert();
         const zoom = .{ .scale = 1 - -(@floatCast(f32, scroll_y) / 15) };
 
-        scene.transform = t.compose(to_origin).compose(zoom).compose(from_origin);
+        transform = t.compose(to_origin).compose(zoom).compose(from_origin);
     } else {
         const scroll = Vec2{ @floatCast(f32, scroll_x), @floatCast(f32, scroll_y) };
-        scene.transform.modify(.{ .translate = scroll * Vec2{ 20, 20 } });
+        transform.modify(.{ .translate = scroll * Vec2{ 20, 20 } });
     }
 }
-
-const tick = std.time.ns_per_s / 60;
 
 pub fn main() !void {
     try glfw.init(.{});
@@ -78,15 +47,14 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    scene = .{
-        .transform = .{ .translate = .{ 400, 300 } },
-        .solver = .{
-            .objects = std.ArrayList(physics.Object).init(allocator),
-        },
-    };
-    defer scene.solver.objects.deinit();
+    transform = .{ .translate = .{ 400, 300 } };
 
-    try scene.solver.objects.append(.{
+    var solver = physics.Solver{
+        .objects = std.ArrayList(physics.Object).init(allocator),
+    };
+    defer solver.objects.deinit();
+
+    try solver.objects.append(.{
         .cur_pos = .{ 200, 0 },
         .old_pos = .{ 0, 0 },
         .acc = .{ 0, 0 },
@@ -105,7 +73,7 @@ pub fn main() !void {
         }
 
         // Step simulation, using delta time of current frame
-        scene.solver.step(@intToFloat(f32, timer.lap()) / std.time.ns_per_s);
+        solver.step(@intToFloat(f32, timer.lap()) / std.time.ns_per_s);
 
         const size = try win.getSize();
         const fb_size = try win.getFramebufferSize();
@@ -122,12 +90,12 @@ pub fn main() !void {
 
         // Transform by view matrix
         ctx.transform(
-            scene.transform.scale,
+            transform.scale,
             0,
             0,
-            scene.transform.scale,
-            scene.transform.translate[0],
-            scene.transform.translate[1],
+            transform.scale,
+            transform.translate[0],
+            transform.translate[1],
         );
 
         // Draw background sphere
@@ -138,7 +106,7 @@ pub fn main() !void {
 
         // Draw solver objects
         ctx.fillColor(nvg.Color.rgba(0x5c, 0xb3, 0xfa, 0xff));
-        for (scene.solver.objects.items) |obj| {
+        for (solver.objects.items) |obj| {
             ctx.beginPath();
             ctx.circle(obj.cur_pos[0], obj.cur_pos[1], obj.radius);
             ctx.fill();
