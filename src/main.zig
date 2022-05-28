@@ -11,6 +11,8 @@ const tick = std.time.ns_per_s / 60;
 
 var transform: Transform = .{};
 
+var rand: std.rand.Random = undefined;
+
 fn scrollCallback(win: glfw.Window, scroll_x: f64, scroll_y: f64) void {
     if (win.getKey(.left_control) == .press) {
         const cursor = win.getCursorPos() catch return;
@@ -27,6 +29,28 @@ fn scrollCallback(win: glfw.Window, scroll_x: f64, scroll_y: f64) void {
         const scroll = Vec2{ @floatCast(f32, scroll_x), @floatCast(f32, scroll_y) };
         transform.modify(.{ .translate = scroll * Vec2{ 20, 20 } });
     }
+}
+
+const Color = enum(u32) {
+    purple = 0xcd74e8ff,
+    red = 0xeb6772ff,
+    orange = 0xdb9d63ff,
+    yellow = 0xe6c07bff,
+    green = 0x9acc76ff,
+    blue = 0x5cb3faff,
+};
+
+fn spawnRandom(solver: *physics.Solver) !void {
+    const x = rand.float(f32) * 2 - 1;
+    const y = rand.float(f32) * 2 - 1;
+    const pos = Vec2{ x, y } * Vec2{ 200, 100 };
+    try solver.objects.append(.{
+        .cur_pos = pos,
+        .old_pos = pos,
+        .acc = .{ 0, 0 },
+        .radius = rand.float(f32) * 40 + 10,
+        .color = nvg.Color.hex(@enumToInt(rand.enumValue(Color))),
+    });
 }
 
 pub fn main() !void {
@@ -49,27 +73,33 @@ pub fn main() !void {
 
     transform = .{ .translate = .{ 400, 300 } };
 
+    rand = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp())).random();
+
     var solver = physics.Solver{
         .objects = std.ArrayList(physics.Object).init(allocator),
     };
     defer solver.objects.deinit();
 
-    try solver.objects.append(.{
-        .cur_pos = .{ 200, 0 },
-        .old_pos = .{ 0, 0 },
-        .acc = .{ 0, 0 },
-        .radius = 50,
-    });
+    try spawnRandom(&solver);
 
     var timer = try std.time.Timer.start();
 
-    while (!win.shouldClose()) {
+    var countdown: usize = 0;
+    var count: usize = 0;
+
+    while (!win.shouldClose()) : (countdown += 1) {
 
         // Lock to frame rate
         var time = timer.read();
         while (time < tick) {
             std.time.sleep(tick - time);
             time = timer.read();
+        }
+
+        if (countdown >= 20 and count < 50) {
+            try spawnRandom(&solver);
+            countdown = 0;
+            count += 1;
         }
 
         // Step simulation, using delta time of current frame
@@ -105,8 +135,8 @@ pub fn main() !void {
         ctx.fill();
 
         // Draw solver objects
-        ctx.fillColor(nvg.Color.rgba(0x5c, 0xb3, 0xfa, 0xff));
         for (solver.objects.items) |obj| {
+            ctx.fillColor(obj.color);
             ctx.beginPath();
             ctx.circle(obj.cur_pos[0], obj.cur_pos[1], obj.radius);
             ctx.fill();
