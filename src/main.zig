@@ -48,7 +48,7 @@ fn spawnRandom(solver: *physics.Solver) !void {
         .cur_pos = pos,
         .old_pos = pos,
         .acc = .{ 0, 0 },
-        .radius = rand.float(f32) * 40 + 10,
+        .radius = rand.float(f32) * 3 + 1,
         .color = nvg.Color.hex(@enumToInt(rand.enumValue(Color))),
     });
 }
@@ -66,6 +66,8 @@ pub fn main() !void {
     defer ctx.deleteGl3();
 
     win.setScrollCallback(scrollCallback);
+
+    ctx.fontFaceId(ctx.createFont("font", "font.ttf"));
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -96,14 +98,16 @@ pub fn main() !void {
             time = timer.read();
         }
 
-        if (countdown >= 20 and count < 50) {
+        const t = timer.lap();
+
+        if (countdown >= 2 and count < 5000) {
             try spawnRandom(&solver);
             countdown = 0;
             count += 1;
         }
 
         // Step simulation, using delta time of current frame
-        solver.step(@intToFloat(f32, timer.lap()) / std.time.ns_per_s);
+        solver.step(1.0 / 60.0);
 
         const size = try win.getSize();
         const fb_size = try win.getFramebufferSize();
@@ -141,6 +145,16 @@ pub fn main() !void {
             ctx.circle(obj.cur_pos[0], obj.cur_pos[1], obj.radius);
             ctx.fill();
         }
+
+        ctx.fillColor(nvg.Color.hex(@enumToInt(Color.purple)));
+        ctx.resetTransform();
+        const txt = try std.fmt.allocPrint(
+            allocator,
+            "{} / {}",
+            .{ t, solver.objects.items.len },
+        );
+        defer allocator.free(txt);
+        _ = ctx.text(10, 30, txt);
 
         ctx.endFrame();
 
