@@ -11,8 +11,8 @@ inline fn v(n: f32) Vec2 {
     return .{ n, n };
 }
 
-inline fn length(a: Vec2) f32 {
-    return @sqrt(@reduce(.Add, a * a));
+inline fn mag2(a: Vec2) f32 {
+    return @reduce(.Add, a * a);
 }
 
 pub const Object = struct {
@@ -59,11 +59,13 @@ pub const Solver = struct {
 
         for (self.objects.items) |*obj| {
             const to_obj = obj.cur_pos - position;
-            const dist = length(to_obj);
+            const dist2 = mag2(to_obj);
+            const radius_diff = radius - obj.radius;
 
-            if (dist > radius - obj.radius) {
+            if (dist2 > radius_diff * radius_diff) {
+                const dist = @sqrt(dist2);
                 const n = to_obj / v(dist);
-                obj.cur_pos = position + n * v(radius - obj.radius);
+                obj.cur_pos = position + n * v(radius_diff);
             }
         }
     }
@@ -81,8 +83,9 @@ pub const Solver = struct {
                 const axis = obj1.cur_pos - obj2.cur_pos;
                 const total_radius = obj1.radius + obj2.radius;
 
-                const dist = length(axis);
-                if (dist < total_radius) {
+                const dist2 = mag2(axis);
+                if (dist2 < total_radius * total_radius) {
+                    const dist = @sqrt(dist2);
                     const n = axis / v(dist);
                     const delta = total_radius - dist;
                     obj1.cur_pos += v(0.5 * delta) * n;
