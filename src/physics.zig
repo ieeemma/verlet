@@ -1,13 +1,13 @@
 const std = @import("std");
 const nvg = @import("nanovg");
 
+const QuadTree = @import("QuadTree.zig");
+
 pub const Vec2 = std.meta.Vector(2, f32);
 
 const gravity = Vec2{ 0, 1000 };
 
-const substeps = 4;
-
-inline fn v(n: f32) Vec2 {
+pub inline fn v(n: f32) Vec2 {
     return .{ n, n };
 }
 
@@ -18,9 +18,11 @@ inline fn mag2(a: Vec2) f32 {
 pub const Object = struct {
     cur_pos: Vec2,
     old_pos: Vec2,
-    acc: Vec2,
+    acc: Vec2 = Vec2{ 0, 0 },
     radius: f32,
     color: nvg.Color,
+
+    rect: QuadTree.Rect = undefined,
 
     pub fn step(self: *Object, dt: f32) void {
         const vel = self.cur_pos - self.old_pos;
@@ -33,28 +35,41 @@ pub const Object = struct {
 
 pub const Solver = struct {
     objects: std.ArrayList(Object),
+    qt: QuadTree,
 
-    pub fn step(self: *Solver, dt: f32) void {
-        const sub_dt = dt / substeps;
+    pub fn add(self: *Solver, obj_c: Object) !void {
+        var obj = obj_c;
+        const r = v(obj.radius);
+        obj.rect = .{ obj.cur_pos - r, obj.cur_pos + r };
 
-        var i: usize = 0;
-        while (i < substeps) : (i += 1) {
-            for (self.objects.items) |*obj| {
-                obj.acc += gravity;
-            }
+        const id = @intCast(u32, self.objects.items.len);
+        try self.objects.append(obj);
+        try self.qt.put(obj.rect, id);
+    }
 
-            self.constrain();
-
-            self.collisions();
-
-            for (self.objects.items) |*obj| {
-                obj.step(sub_dt);
-            }
+    pub fn step(self: *Solver, dt: f32) !void {
+        for (self.objects.items) |*obj| {
+            obj.acc += gravity;
         }
+
+        for (self.objects.items) |*obj, j| {
+            obj.step(dt);
+            const id = @intCast(u32, j);
+
+            std.debug.assert(self.qt.remove(obj.rect, id));
+
+            const r = v(obj.radius);
+            const new_rect = QuadTree.Rect{ obj.cur_pos - r, obj.cur_pos + r };
+            try self.qt.put(new_rect, id);
+            obj.rect = new_rect;
+        }
+
+        self.constrain();
+        try self.collisions();
     }
 
     fn constrain(self: *Solver) void {
-        const position = Vec2{ 0, 0 };
+        const position = Vec2{ 400, 400 };
         const radius = 400;
 
         for (self.objects.items) |*obj| {
@@ -70,28 +85,34 @@ pub const Solver = struct {
         }
     }
 
-    fn collisions(self: *Solver) void {
-        // O(n^2) brute force, for now. This is slow!
-        for (self.objects.items) |*obj1| {
-            for (self.objects.items) |*obj2| {
-                if (obj1 == obj2) continue;
+    fn resolve(a: *Object, b: *Object) void {
+        // If the length of the vector between two circles is less than
+        // the sum of their radii, move them apart along the axis
+        // of intersection.
 
-                // If the length of the vector between two circles is less than
-                // the sum of their radii, move them apart along the axis
-                // of intersection.
+        const axis = a.cur_pos - b.cur_pos;
+        const total_radius = a.radius + b.radius;
 
-                const axis = obj1.cur_pos - obj2.cur_pos;
-                const total_radius = obj1.radius + obj2.radius;
+        const dist2 = mag2(axis);
+        if (dist2 < total_radius * total_radius) {
+            const dist = @sqrt(dist2);
+            const n = axis / v(dist);
+            const delta = total_radius - dist;
+            a.cur_pos += v(0.5 * delta) * n;
+            b.cur_pos -= v(0.5 * delta) * n;
+        }
+    }
 
-                const dist2 = mag2(axis);
-                if (dist2 < total_radius * total_radius) {
-                    const dist = @sqrt(dist2);
-                    const n = axis / v(dist);
-                    const delta = total_radius - dist;
-                    obj1.cur_pos += v(0.5 * delta) * n;
-                    obj2.cur_pos -= v(0.5 * delta) * n;
-                }
+    fn collisions(self: *Solver) !void {
+        var results = std.ArrayList(u32).init(self.objects.allocator);
+        defer results.deinit();
+
+        for (self.objects.items) |*obj, id1| {
+            try self.qt.get(&results, obj.rect);
+            for (results.items) |id2| {
+                if (id1 != id2) resolve(obj, &self.objects.items[id2]);
             }
+            results.clearRetainingCapacity();
         }
     }
 };

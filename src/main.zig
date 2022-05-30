@@ -6,6 +6,7 @@ const nvg = @import("nanovg");
 const physics = @import("physics.zig");
 const Vec2 = physics.Vec2;
 const Transform = @import("Transform.zig");
+const QuadTree = @import("QuadTree.zig");
 
 const tick = std.time.ns_per_s / 60;
 
@@ -43,12 +44,11 @@ const Color = enum(u32) {
 fn spawnRandom(solver: *physics.Solver) !void {
     const x = rand.float(f32) * 2 - 1;
     const y = rand.float(f32) * 2 - 1;
-    const pos = Vec2{ x, y } * Vec2{ 200, 100 };
-    try solver.objects.append(.{
+    const pos = Vec2{ x, y } * Vec2{ 200, 100 } + Vec2{ 400, 400 };
+    try solver.add(.{
         .cur_pos = pos,
         .old_pos = pos,
-        .acc = .{ 0, 0 },
-        .radius = rand.float(f32) * 3 + 1,
+        .radius = rand.float(f32) * 20 + 5,
         .color = nvg.Color.hex(@enumToInt(rand.enumValue(Color))),
     });
 }
@@ -73,23 +73,25 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    transform = .{ .translate = .{ 400, 300 } };
+    transform = .{ .translate = .{ 0, -100 } };
 
     rand = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp())).random();
 
     var solver = physics.Solver{
         .objects = std.ArrayList(physics.Object).init(allocator),
+        .qt = .{
+            .allocator = allocator,
+            .size = .{ 800, 800 },
+        },
     };
     defer solver.objects.deinit();
-
-    try spawnRandom(&solver);
+    defer solver.qt.deinit();
 
     var timer = try std.time.Timer.start();
 
-    var countdown: usize = 0;
     var count: usize = 0;
 
-    while (!win.shouldClose()) : (countdown += 1) {
+    while (!win.shouldClose()) : (count += 1) {
 
         // Lock to frame rate
         var time = timer.read();
@@ -100,14 +102,13 @@ pub fn main() !void {
 
         const t = timer.lap();
 
-        if (countdown >= 2 and count < 5000) {
-            try spawnRandom(&solver);
-            countdown = 0;
-            count += 1;
-        }
+        if (count % 15 == 0) try spawnRandom(&solver);
 
         // Step simulation, using delta time of current frame
-        solver.step(1.0 / 60.0);
+        var step: usize = 0;
+        while (step < 4) : (step += 1) {
+            try solver.step(1.0 / 60.0 / 4.0);
+        }
 
         const size = try win.getSize();
         const fb_size = try win.getFramebufferSize();
@@ -135,7 +136,7 @@ pub fn main() !void {
         // Draw background sphere
         ctx.beginPath();
         ctx.fillColor(nvg.Color.rgba(0x21, 0x25, 0x2b, 0xff));
-        ctx.circle(0, 0, 400);
+        ctx.circle(400, 400, 400);
         ctx.fill();
 
         // Draw solver objects
@@ -145,6 +146,9 @@ pub fn main() !void {
             ctx.circle(obj.cur_pos[0], obj.cur_pos[1], obj.radius);
             ctx.fill();
         }
+
+        // Draw quad tree regions
+        try solver.qt.draw(ctx);
 
         ctx.fillColor(nvg.Color.hex(@enumToInt(Color.purple)));
         ctx.resetTransform();
